@@ -74,19 +74,25 @@ installation_completed_hook() {
 
 
     echo "Backup secrets ..."
-    mkdir -p /var/gitlab/secrets-backup
+    mkdir -p /var/gitlab/secrets-backup && cd /var/gitlab/secrets-backup
 
     while [ -z "$(kubectl get secrets gitlab-rails-secret | grep Opaque)" ]; do sleep 10; done
-    [ -f /var/gitlab/secrets-backup/secrets.yaml ] && cp /var/gitlab/secrets-backup/secrets.yaml /var/gitlab/secrets-backup/secrets_backup.yaml
-    printf "secrets.yml: " > /var/gitlab/secrets-backup/secrets.yaml
-    kubectl get secrets gitlab-rails-secret -o jsonpath="{.data['secrets\.yml']}" >> /var/gitlab/secrets-backup/secrets.yaml
+    [ -f gitlab-rails-secret ] && cp gitlab-rails-secret .gitlab-rails-secret_$(date -Iseconds).backup
+    printf "secrets.yml: %s\n" "$(kubectl get secrets gitlab-rails-secret -o jsonpath="{.data['secrets\.yml']}")" > gitlab-rails-secret
     
     while [ -z "$(kubectl get secrets gitlab-postgresql-password | grep Opaque)" ]; do sleep 10; done
-    [ -f /var/gitlab/secrets-backup/postgresql-passwords.yaml ] && cp /var/gitlab/secrets-backup/postgresql-passwords.yaml /var/gitlab/secrets-backup/postgresql-passwords_backup.yaml
-    printf "postgresql-password: " > /var/gitlab/secrets-backup/postgresql-passwords.yaml
-    kubectl get secrets gitlab-postgresql-password -o jsonpath="{.data.postgresql-password}" >> /var/gitlab/secrets-backup/postgresql-passwords.yaml
-    printf "\npostgresql-postgres-password: " >> /var/gitlab/secrets-backup/postgresql-passwords.yaml
-    kubectl get secrets gitlab-postgresql-password -o jsonpath="{.data.postgresql-postgres-password}" >> /var/gitlab/secrets-backup/postgresql-passwords.yaml
+    [ -f gitlab-postgresql-password ] && cp gitlab-postgresql-password .gitlab-postgresql-password_$(date -Iseconds).backup
+    printf "postgresql-password: %s\n" "$(kubectl get secrets gitlab-postgresql-password -o jsonpath='{.data.postgresql-password}')" > gitlab-postgresql-password
+    printf "postgresql-postgres-password: %s\n" "$(kubectl get secrets gitlab-postgresql-password -o jsonpath='{.data.postgresql-postgres-password}')" >> gitlab-postgresql-password
+
+    while [ -z "$(kubectl get secrets gitlab-gitlab-runner-secret | grep Opaque)" ]; do sleep 10; done
+    [ -f gitlab-gitlab-runner-secret ] && cp gitlab-gitlab-runner-secret .gitlab-gitlab-runner-secret_$(date -Iseconds).backup
+    printf "runner-registration-token: %s\n" "$(kubectl get secrets gitlab-gitlab-runner-secret -o jsonpath='{.data.runner-registration-token}')" > gitlab-gitlab-runner-secret
+    printf "runner-token: %s\n" "$(kubectl get secrets gitlab-gitlab-runner-secret -o jsonpath='{.data.runner-token}')" >> gitlab-gitlab-runner-secret
+
+    while [ -z "$(kubectl get secrets gitlab-gitlab-initial-root-password | grep Opaque)" ]; do sleep 10; done
+    [ -f gitlab-gitlab-initial-root-password ] && cp gitlab-gitlab-initial-root-password .gitlab-gitlab-initial-root-password_$(date -Iseconds).backup
+    printf "password: %s\n" "$(kubectl get secrets gitlab-gitlab-initial-root-password -o jsonpath='{.data.password}')" > gitlab-gitlab-initial-root-password
 }
 installation_completed_hook &
 
@@ -106,35 +112,24 @@ data:
 EOF
 
 
-# add rails secret
-if [ -f /var/gitlab/secrets-backup/secrets.yaml ]; then
-echo "Restoring gitlab-rails-secret ..."
-cat << EOF > /var/lib/rancher/k3s/server/manifests/rails-secrets.yaml
+# restore secrets
+if [ -d /var/gitlab/secrets-backup ]; then
+    cd /var/gitlab/secrets-backup
+    for s in $(ls); do
+        echo "Restoring secret $s ..."
+        cat << EOF > "/var/lib/rancher/k3s/server/manifests/$s.yaml"
 apiVersion: v1
 kind: Secret
 metadata:
-  name: gitlab-rails-secret
+  name: $s
   labels:
     app: shared-secrets
 type: Opaque
 data:
 EOF
-sed 's/^/  /' /var/gitlab/secrets-backup/secrets.yaml >> /var/lib/rancher/k3s/server/manifests/rails-secrets.yaml
-fi
-
-
-# add postgresql passwords secret
-if [ -f /var/gitlab/secrets-backup/postgresql-passwords.yaml ]; then
-echo "Restoring gitlab-postgresql-password ..."
-cat << EOF > /var/lib/rancher/k3s/server/manifests/postgresql-passwords.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gitlab-postgresql-password
-type: Opaque
-data:
-EOF
-sed 's/^/  /' /var/gitlab/secrets-backup/postgresql-passwords.yaml >> /var/lib/rancher/k3s/server/manifests/postgresql-passwords.yaml
+        sed 's/^/  /' "$s" >> "/var/lib/rancher/k3s/server/manifests/$s.yaml"
+    done
+    cd -
 fi
 
 
