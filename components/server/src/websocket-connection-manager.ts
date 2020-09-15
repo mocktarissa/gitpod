@@ -11,6 +11,7 @@ import { ConnectionHandler } from "@gitpod/gitpod-protocol/lib/messaging/handler
 import { MessageConnection } from "vscode-jsonrpc";
 import { EventEmitter } from "events";
 import * as express from "express";
+import { OwnerResourceGuard } from "./auth/resource-access";
 
 export type GitpodServiceFactory<C extends GitpodClient, S extends GitpodServer> = () => GitpodServerImpl<C, S>;
 
@@ -41,7 +42,8 @@ export class WebsocketConnectionManager<C extends GitpodClient, S extends Gitpod
 
         const gitpodServer = this.serverFactory();
         const clientRegion = (expressReq as any).headers["x-glb-client-region"];
-        gitpodServer.initialize(client, clientRegion, expressReq.user as User);
+        const user = expressReq.user as User;
+        gitpodServer.initialize(client, clientRegion, user, new OwnerResourceGuard(user.id));
         client.onDidCloseConnection(() => {
             gitpodServer.dispose();
 
